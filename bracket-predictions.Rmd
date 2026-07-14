@@ -1,0 +1,782 @@
+---
+title: "bracket-predictions"
+author: "Sam Murray"
+date: "2/15/2023"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(rvest)
+setwd("~/Desktop/Other/Basketball/NCAAB/Teams/NCAAB_team_bracketology")
+
+# cbd_torvik_ncaa_sheets <- function(year) {
+# 
+#   # data only back to 2019
+#   if(year < 2019) {
+#          cli_abort(c('Unsupported `year`.',
+#                      'i' = 'Data only goes back to 2019.',
+#                      'x' = 'You requested `year = {year}`'))
+#   }
+# 
+#   # scrape
+#   #local_options(HTTPUserAgent='CBB-DATA') # in case user on windows
+#   data <- suppressWarnings({
+#     read_html(paste0('https://barttorvik.com/teamsheets.php?year=','year')) %>%
+#       html_table() %>%
+#       pluck(1) %>%
+#       setNames(c('rank', 'team', 'net', 'kpi_resume', 'sor_resume', 'avg_resume',
+#                  'bpi_quality', 'kp_quality', 'sag_quality', 'avg_quality',
+#                  'quad_1a', 'quad_1', 'quad_2', 'quad_1_and_2', 'quad_3', 'quad_4')) %>%
+#       slice(-1) %>% # drop first row // junk
+#       separate(team, into = c('team', 'seed'), sep = "(?<=\\D) (?=\\d)", convert = TRUE) # add seed
+#   })
+# 
+#   return(data)
+# }
+
+#cbd_torvik_ncaa_sheets(2025)
+```
+
+
+```{r}
+train=read.csv('../teamCSVs/team_predictions.csv')
+# Fix column names
+colnames(train)=gsub("\\.", "%", colnames(train))
+#colnames(train)[9] = 'TotalS%'
+colnames(train)[4] = 'Exit-Round'
+
+train = train %>% 
+  mutate(adj_eff_margin=AdjEM,
+        `3PA%` = `X3PA` / FGA,
+         `3PA%_Opp` = `X3PA_Opp` / FGA_Opp,
+         FTR = FTA / FGA,
+         FTR_Opp = FTA_Opp / FGA_Opp,
+         FTR_margin = FTR - FTR_Opp,
+         eFG_margin = `eFG%` - `eFG%_Opp`,
+         extra_poss = (ORB/(FGA-FGM))*36*(100/Poss) + `TOV%_Opp`,
+         Opp_extra_poss = (ORB_Opp/(FGA_Opp-FGM_Opp))*36*(100/Poss_Opp) + `TOV%`,
+         adj_extra_poss_margin = (extra_poss - Opp_extra_poss),
+         y=Result/2,
+         SOS_rate = SOS / max(SOS),
+         SOS_adt = case_when(SOS<0 ~ SOS-100,
+                         SOS<5 ~ SOS,
+                         SOS>=5 ~ SOS^2),
+        orate = ORB/(FGA-FGM))
+train=train %>% 
+  distinct(Team, Year, .keep_all=T)
+
+train['tounament_status'] = case_when(train$`Exit-Round` == '0Missed Tournament' ~ 0,
+                                      TRUE ~ 1)
+
+z = function(v){
+  return( (v-mean(v)) / sd(v)  )
+}
+train=train %>% 
+  group_by(Year) %>% 
+  mutate(FTR_yz = z(FTR_margin),
+         SOS_yz = z(SOS),
+         TS_yz = z(`TS%`),
+         eFG_yz = z(eFG_margin),
+         kp_yz = z(adj_eff_margin),
+         kpO_yz = z(AdjOE),
+         kpD_yz = z(AdjDE),
+         exPoss_yz = z(adj_extra_poss_margin),
+         qWpct_yz = z(`Qual%Win%Pct`),
+         qGames_yz = z(`Qual%Games`),
+         qWins_yz = z(`Qual%Games`*`Qual%Win%Pct`)
+         )
+```
+
+```{r}
+
+```
+
+```{r}
+mod = glm(tounament_status ~  kpO_yz + kpD_yz + `SOR%RK` + qWins_yz + SOS_yz#I(qGames_yz * qWpct_yz)# + `Qual%Games`# + SOS_yz + qGames_yz
+          , data=train, family="binomial")
+
+summary(mod)
+```
+
+
+```{r}
+# 
+# curr = read.csv('../teamCSVs/currentSzn.csv')
+# 
+# # fix col names
+# colnames(curr)=gsub("\\.", "%", colnames(curr))
+# #colnames(curr)[6] = 'TotalS%'
+# 
+# # add new columns
+# curr = curr %>% 
+#   mutate(adj_eff_margin=AdjEM,
+#          extra_poss = (ORB/(FGA-FGM))*36*(100/Poss) + `TOV%_Opp`,
+#          Opp_extra_poss = (ORB_Opp/(FGA_Opp-FGM_Opp))*36*(100/Poss_Opp) + `TOV%`,
+#          `3PA%` = `X3PA` / FGA,
+#          `3PA%_Opp` = `X3PA_Opp` / FGA_Opp,
+#          FTR = FTA / FGA,
+#          FTR_Opp = FTA_Opp / FGA_Opp,
+#          FTR_margin = FTR - FTR_Opp,
+#          eFG_margin = `eFG%` - `eFG%_Opp`,
+#          adj_extra_poss_margin = as.numeric(extra_poss - Opp_extra_poss),
+#          SOS_rate = SOS / max(SOS),
+#          `Opp_OR%` = 100*(ORB_Opp/FGA_Opp),
+#          `OR%` = 100*(ORB/FGA),
+#          kpO_yz = z(AdjOE),
+#          kpD_yz = z(AdjDE),
+#          SOS_adt = case_when(SOS<0 ~ SOS-100,
+#                          SOS<5 ~ SOS,
+#                          SOS>=5 ~ SOS^2))
+# curr=curr %>% 
+#   #group_by(Year) %>% 
+#   mutate(FTR_yz = z(FTR_margin),
+#          SOS_yz = z(SOS),
+#          TS_yz = z(`TS%`),
+#          eFG_yz = z(eFG_margin),
+#          kp_yz = z(adj_eff_margin),
+#          exPoss_yz = z(adj_extra_poss_margin),
+#          qWpct_yz = z(`Qual%Win%Pct`),
+#          qGames_yz = z(`Qual%Games`),
+#          qWins_yz = z(`Qual%Games`*`Qual%Win%Pct`)
+#          )
+# 
+# seeds = c(rep(1, 4),
+#   rep(2, 4),
+#   rep(3, 4),
+#   rep(4, 4),
+#   rep(5, 4),
+#   rep(6, 4),
+#   rep(7, 4),
+#   rep(8, 4),
+#   rep(9, 4),
+#   rep(10, 4),
+#   rep(11, 6))
+# 
+# while (length(seeds) < length(curr$Team)){
+#   seeds = append(seeds, "MISSED")
+# }
+# 
+# predictions = data.frame(Team = curr['Team'],
+#                          Conference = curr['Conference'],
+#                          value = as.numeric(predict(object=mod, newdata=curr,type="response")),
+#                          Projected.Overall.Rank = round(as.numeric(predict(object=mod, newdata=curr,type="response"))),
+#                          Quality.Games = curr['Qual%Record'],
+#                          SOS = curr['SOS'],
+#                          `SOR%RK` = curr['SOR%RK'])
+# 
+# colnames(predictions)[5]='Quality.Games'
+# predictions$Conference = predictions$Conference
+# predictions = predictions %>% 
+#   arrange(desc(value)) %>% 
+#   mutate(Projected.Seed = seeds) %>% 
+#   select(Team, Conference, value, Projected.Seed, Quality.Games, SOS,`SOR.RK`)
+# 
+# 
+# autobids <- predictions %>% 
+#              group_by(Conference) %>%
+#              filter(value == max(value) & Conference != "Independents") %>%
+#              arrange(desc(value))
+# 
+# autobids$bid = "auto"
+# autobids$first.four = FALSE
+# autobids$first.four[autobids$Team %in% tail(autobids, 4)$Team] = TRUE
+# 
+# 
+# 
+# at.large <- predictions %>% 
+#   filter(!(Team %in% autobids$Team)) %>% 
+#   arrange(desc(value))
+# 
+# both <- predictions[1:37,] %>% 
+#   filter(Team %in% autobids$Team) %>% 
+#   arrange(desc(value))
+# 
+# at.large = at.large[1:37,]
+# autobids$Team = paste0(autobids$Team, "*")
+# 
+# at.large$bid="at large"
+# at.large$first.four = FALSE
+# at.large$first.four[at.large$Team %in% tail(at.large, 4)$Team] = TRUE
+# 
+# made = rbind(autobids, at.large) %>% arrange(desc(value))
+# 
+# seeds = c(rep(1, 4),
+#   rep(2, 4),
+#   rep(3, 4),
+#   rep(4, 4),
+#   rep(5, 4),
+#   rep(6, 4),
+#   rep(7, 4),
+#   rep(8, 4),
+#   rep(9, 4),
+#   rep(10, 4),
+#   rep(11, 4),
+#   rep(12, 6),
+#   rep(13, 4),
+#   rep(14, 4),
+#   rep(15, 4),
+#   rep(16, 6))
+# 
+# made = made %>% arrange(desc(value)) %>% select(-first.four, -bid, -value)
+# made$Projected.Seed = seeds
+# 
+# missed <- predictions %>% 
+#   filter(!(Team %in% gsub("\\*", "", made$Team)) )
+# 
+# made$Projected.Seed = as.character(made$Projected.Seed)
+# predictions=rbind(made,missed) %>% select(-value)
+# #predictions = predictions[predictions$Projected.Seed != 'MISSED',]
+# #predictions %>% filter(!(Team %in% predictions2$Team)) %>% arrange(desc(Conference))
+# write.csv(predictions, "../teamCSVs/bracketPredictions.csv", row.names=FALSE)
+# ```
+# 
+# 
+# 
+# ```{r}
+# cbbdata::cbd_login()
+# library(cbbdata)
+# 
+# # data2 = cbbdata::cbd_torvik_player_season(year=2025)
+# # pl = data2 %>%
+# #   dplyr::rename(`Pos` = pos,
+# #                 GP = g,
+# #                 #Player = player,
+# #                 Class = exp,
+# #                 #School = team,
+# #                PPG = ppg,
+# #                `FGA` = fga,
+# #                `Rim FG%` = rim_pct,
+# #                `Rim FGA` = rim_a,
+# #                `Mid FG%` = mid_pct,
+# #                `Mid FGA` = mid_a,
+# #                `3P%` = three_pct,
+# #                `3PA` = three_a,
+# #                `2P%` = two_pct,
+# #                `2PA` = two_a,
+# #                `FT%` = ft_pct,
+# #                `FTA` = fta,
+# #                APG = apg,
+# #                TOV = tov,
+# #                `AST:TOV` = ast_to,
+# #                ORB = oreb,
+# #                DRB = dreb,
+# #                TRB = rpg,
+# #                #BPM = round(mean(bpm),1),
+# #                #OBPM = mean(obpm),
+# #                #DBPM = mean(dbpm),
+# #                `TS%` =  ts,
+# #                `eFG%` = efg,
+# #                MPG = mpg,
+# #                SPG = spg,
+# #                BPG = bpg,
+# #                ORtg = ortg,
+# #                DRtg = drtg) %>%
+# #               dplyr::arrange(desc(PPG))
+# # 
+# # pl = pl %>%
+# #   mutate(`3P%` = `3P%`*100,
+# #          `3PA` = `3PA`/GP,
+# #          `2P%` = `2P%`*100,
+# #          `2PA` = `2PA`/GP,
+# #          #`FT%` = `FT%`*100,
+# #          `FTA` = `FTA`/GP)
+# # 
+# # 
+# #cbbdata::cbd_login()
+# #library(cbbdata)
+# 
+# data2 = cbbdata::cbd_torvik_player_game(year=2025)
+# 
+# #base_url <- 'https://www.cbbdata.com/api/torvik/player/game?'
+# 
+# #data <- cbbdata:::get_cbd_file(base_url, 2025)
+# data2$conf.game = data2$conf == data2$opp_conf
+# data2$month = format(data2$date,"%B")
+# pl = data2 %>%
+#   dplyr::filter(conf.game==T) %>%
+#   dplyr::group_by(player,team,conf) %>%
+#   dplyr::reframe( GP = n(),
+#              `Poss` = round(sum(poss),0),
+#              PPG = round(mean(pts), 1),
+#              `FGA` = round(mean(two_a) + mean(three_a), 1),
+#              `Rim FG%` = round((sum(rim_m) / sum(rim_a))*100, 1),
+#              `Rim FGA` = round(mean(rim_a), 1),
+#              `Mid FG%` = round((sum(mid_m) / sum(mid_a))*100, 1),
+#              `Mid FGA` = round(mean(mid_a), 1),
+#              `3P%` = round((sum(three_m) / sum(three_a))*100, 1),
+#              `3PA` = round(mean(three_a), 1),
+#              `2P%` = round((sum(two_m) / sum(two_a))*100, 1),
+#              `2PA` = round(mean(two_a), 1),
+#              `FT%` = sum(ftm) / sum(fta),
+#              `FTA` = mean(fta),
+#              APG = round(mean(ast), 1),
+#              TOV = round(mean(tov), 1),
+#              `AST:TOV` = round(sum(ast) / sum(tov), 1),
+#              ORB = round(mean(oreb), 1),
+#              DRB = round(mean(dreb), 1),
+#              TRB = round(mean(oreb) + mean(dreb),1),
+#              BPM = round(mean(bpm),1),
+#              OBPM = mean(obpm),
+#              DBPM = mean(dbpm),
+#              `TS%` =  ((sum(pts) / ( 2 * ((sum(two_a) + sum(three_a)) + (0.44 * sum(fta)))))*100),
+#              `eFG%` = (( ((sum(two_m)+sum(three_m)) + (0.5 * sum(three_m))) / (sum(two_a) + sum(three_a)))*100),
+#              MPG = mean(min),
+#              SPG = mean(stl),
+#              BPG = mean(blk),
+#              ORtg = mean(ortg)) %>%
+#                    dplyr::arrange(desc(PPG))
+# 
+# 
+# pl = pl %>%
+#   group_by(player) %>%
+#   filter(row_number()==1)
+# # 
+# #data2 = cbd_torvik_player_split(year = 2025, split = 'game_type')
+# # pl = data2 %>%
+# #   dplyr::filter(type=='conf') %>%
+# #   dplyr::rename(#`Pos` = pos,
+# #                 GP = games,
+# #                 #Player = player,
+# #                 Class = exp,
+# #                 #School = team,
+# #                PPG = pts) #%>%
+# #   dplyr::select(player, GP)
+# #  `FGA` = fga,
+# #  `Rim FG%` = rim_pct,
+# #  `Rim FGA` = rim_a,
+# #  `Mid FG%` = mid_pct,
+# #  `Mid FGA` = mid_a,
+# #  `3P%` = three_pct,
+# #  `3PA` = three_a,
+# #  `2P%` = two_pct,
+# #  `2PA` = two_a,
+# #  `FT%` = ft_pct,
+# #  `FTA` = fta,
+# #  APG = apg,
+# #  TOV = tov,
+# #  `AST:TOV` = ast_to,
+# #  ORB = oreb,
+# #  DRB = dreb,
+# #  TRB = rpg,
+# #  #BPM = round(mean(bpm),1),
+# #  #OBPM = mean(obpm),
+# #  #DBPM = mean(dbpm),
+# #  `TS%` =  ts,
+# #  `eFG%` = efg,
+# #  MPG = mpg,
+# #  SPG = spg,
+# #  BPG = bpg,
+# #  ORtg = ortg,
+# #  DRtg = drtg) %>%
+# # dplyr::arrange(desc(PPG))
+# # 
+# # pl = pl %>%
+# #   mutate(`3P%` = `3P%`*100,
+# #          `3PA` = `3PA`/GP,
+# #          `2P%` = `2P%`*100,
+# #          `2PA` = `2PA`/GP,
+# #          #`FT%` = `FT%`*100,
+# #          `FTA` = `FTA`/GP)
+# 
+# tv = pl
+# tv$team = gsub("St\\.$", "State", tv$team)
+# tv$team = gsub("College of Charleston", "Charleston", tv$team)
+# tv$team = gsub("^Connecticut", "UConn", tv$team)
+# tv$team = gsub("Central Uconn", "UConn", tv$team)
+# tv$team = gsub("Boston University", "Boston U", tv$team)
+# tv$team = gsub("FIU", "Florida International", tv$team)
+# tv$team = gsub("Central Connecticut", "Central Connecticut State", tv$team)
+# tv$team = gsub("Louisiana Lafayette", "Louisiana", tv$team)
+# tv$team = gsub("Middle Tennessee", "Middle Tennessee State", tv$team)
+# tv$team = gsub("VMI", "Virginia Military", tv$team)
+# tv$team = gsub("Detroit", "Detroit Mercy", tv$team)
+# tv$team = gsub("LIU Brooklyn", "Long Island", tv$team)
+# tv$team = gsub("Massachusetts", "UMass", tv$team)
+# tv$team = gsub("^Mississippi$", "Ole Miss", tv$team)
+# tv$team = gsub("Mount State Mary's", "Mount Saint Mary's", tv$team)
+# tv$team = gsub("North Carolina State", "NC State", tv$team)
+# tv$team = gsub("Nebraska Omaha", "Omaha", tv$team)
+# tv$team = gsub("Saint Bonaventure", "St. Bonaventure", tv$team)
+# tv$team = gsub("Cal St\\.", "Cal State", tv$team)
+# tv$team = gsub("Mount St\\.", "Mount Saint", tv$team)
+# tv$team = gsub("F\\.", "F", tv$team)
+# tv$team = gsub("UTSA", "UT San Antonio", tv$team)
+# tv$team = gsub("Texas A&M Corpus Chris", "Texas A&M CC", tv$team)
+# 
+# write.csv(tv, "../../Players/playerCSVs/playerConfStats.csv", row.names=FALSE)
+```
+
+
+
+
+
+
+
+
+
+
+```{r}
+#curr.sheets = cbbdata::cbd_torvik_ncaa_sheets(year=2025)
+
+curr.sheets = read_html('https://barttorvik.com/teamsheets.php?year=2025') %>% html_table()
+curr.sheets = data.frame(curr.sheets)
+colnames(curr.sheets) <- curr.sheets[1,]
+curr.sheets <- curr.sheets[-1, ] 
+colnames(curr.sheets) = tolower(colnames(curr.sheets))
+curr.sheets$team = gsub(' 10', '', curr.sheets$team)
+curr.sheets$team = gsub(' 11', '', curr.sheets$team)
+curr.sheets$team = gsub(' 12', '', curr.sheets$team)
+curr.sheets$team = gsub(' 13', '', curr.sheets$team)
+curr.sheets$team = gsub(' 14', '', curr.sheets$team)
+curr.sheets$team = gsub(' 15', '', curr.sheets$team)
+curr.sheets$team = gsub(' 16', '', curr.sheets$team)
+curr.sheets$team = gsub(' 1', '', curr.sheets$team)
+curr.sheets$team = gsub(' 2', '', curr.sheets$team)
+curr.sheets$team = gsub(' 3', '', curr.sheets$team)
+curr.sheets$team = gsub(' 4', '', curr.sheets$team)
+curr.sheets$team = gsub(' 5', '', curr.sheets$team)
+curr.sheets$team = gsub(' 6', '', curr.sheets$team)
+curr.sheets$team = gsub(' 7', '', curr.sheets$team)
+curr.sheets$team = gsub(' 8', '', curr.sheets$team)
+curr.sheets$team = gsub(' 9', '', curr.sheets$team)
+curr.sheets$team = gsub(' F4O', '', curr.sheets$team)
+curr.sheets$team = gsub(' N4O', '', curr.sheets$team)
+curr.resume = cbbdata::cbd_torvik_current_resume() %>% select(team, quad4)                    
+
+#cbbdata::cbd_all_metrics()
+
+colnames(curr.sheets) = make.unique(colnames(curr.sheets))
+
+curr.sheets = left_join(curr.sheets, curr.resume, by='team')
+curr.sheets$year = 2025
+
+curr.sheets$quad4 = curr.sheets$quad_3
+curr.sheets$quad_3 = curr.sheets$quad_1_and_2
+curr.sheets$quad_1_and_2 = curr.sheets$quad_2
+curr.sheets$quad_2 = curr.sheets$quad_1
+curr.sheets$quad_1 = curr.sheets$quad_1a
+curr.sheets$quad_1a = curr.sheets$avg_quality
+
+sheet.19 = cbbdata::cbd_torvik_ncaa_sheets(year=2019)
+sheet.19$year = 2019
+sheet.20 = cbbdata::cbd_torvik_ncaa_sheets(year=2020)
+sheet.20$year = 2020
+sheet.21 = cbbdata::cbd_torvik_ncaa_sheets(year=2021)
+sheet.21$year = 2021
+sheet.22 = cbbdata::cbd_torvik_ncaa_sheets(year=2022)
+sheet.22$year = 2022
+sheet.23 = cbbdata::cbd_torvik_ncaa_sheets(year=2023)
+sheet.23$year = 2023
+sheet.24 = cbbdata::cbd_torvik_ncaa_sheets(year=2024)
+sheet.24$year = 2024
+sheet.24$quad_4 = NA
+train2 = rbind(sheet.19, sheet.20, sheet.21, sheet.22, sheet.23, sheet.24)
+
+res = cbbdata::cbd_torvik_current_resume() %>% select(team, conf, barthag, elo, wab)
+
+train2$team = gsub(" F4O", "", train2$team)
+train2$team = gsub(" N4O", "", train2$team)
+
+train2 = left_join(train2, res, by='team') %>% 
+  filter(conf %in% c("B10", "B12", "ACC", "SEC", "BE", "MWC", "A10", "WCC"),
+         seed<12)
+
+curr.sheets = left_join(curr.sheets, res, by='team')# %>% 
+#  filter(conf %in% c("B10", "B12", "ACC", "SEC", "BE", "P12", "MWC", "A10"),)
+
+train2$team = gsub(" F4O", "", train2$team)
+train2$team = gsub(" N4O", "", train2$team)
+
+
+curr.sheets = curr.sheets %>% 
+  dplyr::rename(kpi_resume = kpi,
+         sor_resume = sor,
+         kp_quality = kp,
+         bpi_quality = bpi,
+         avg_resume = avg,
+         avg_quality = avg.1)
+```
+
+
+```{r}
+train2$Y = case_when(is.na(train2$seed) ~ 0, TRUE ~ 1)
+library(stringr)
+train2$quad_1a_W = as.numeric(str_split_fixed(train2$quad_1a, "-", 2)[,1])
+train2$quad_1a_L = as.numeric(str_split_fixed(train2$quad_1a, "-", 2)[,2])
+train2$quad_1a_pct = train2$quad_1a_W / (train2$quad_1a_W + train2$quad_1a_L)
+
+train2$quad_1_W = as.numeric(str_split_fixed(train2$quad_1, "-", 2)[,1])
+train2$quad_1_L = as.numeric(str_split_fixed(train2$quad_1, "-", 2)[,2])
+train2$quad_1_pct = train2$quad_1_W / (train2$quad_1_W + train2$quad_1_L)
+
+train2$quad_2_W = as.numeric(str_split_fixed(train2$quad_2, "-", 2)[,1])
+train2$quad_2_L = as.numeric(str_split_fixed(train2$quad_2, "-", 2)[,2])
+
+train2$quad_3_W = as.numeric(str_split_fixed(train2$quad_3, "-", 2)[,1])
+train2$quad_3_L = as.numeric(str_split_fixed(train2$quad_3, "-", 2)[,2])
+
+train2$quad_4_W = as.numeric(str_split_fixed(train2$quad_4, "-", 2)[,1])
+train2$quad_4_L = as.numeric(str_split_fixed(train2$quad_4, "-", 2)[,2])
+
+train2$quad_234_W = train2$quad_2_W + train2$quad_3_W + train2$quad_4_W
+train2$quad_234_L = train2$quad_2_L + train2$quad_3_L + train2$quad_4_L
+
+train2$quad_234_pct = train2$quad_234_W / (train2$quad_234_W + train2$quad_234_L)
+
+train2$net = as.numeric(train2$net)
+train2$kpi_resume = as.numeric(train2$kpi_resume)
+train2$sor_resume = as.numeric(train2$sor_resume)
+train2$bpi_quality = as.numeric(train2$bpi_quality)
+train2$kp_quality = as.numeric(train2$kp_quality)
+train2$avg_resume = as.numeric(train2$avg_resume)
+train2$avg_quality = as.numeric(train2$avg_quality)
+
+train2 = train2 %>% filter(net<150)
+
+train2$net_pct = 1 / train2$net
+train2$kpi_resume_pct = 1 / train2$kpi_resume
+train2$sor_resume_pct = 1 / train2$sor_resume
+train2$avg_quality_pct = 1 / train2$avg_quality
+
+train2$net_neg = train2$net*(-1)
+train2$kpi_resume_neg = train2$kpi_resume*(-1)
+train2$sor_resume_neg = train2$sor_resume*(-1)
+train2$avg_quality_neg = train2$avg_quality*(-1)
+
+train2$quad_234_pct[train2$quad_234_L==0 &
+                    train2$quad_234_W==0] = 0
+
+train2$quad_1_pct[train2$quad_1_L==0 &
+                  train2$quad_1_W==0] = 0
+
+curr.sheets$quad_1a_W = as.numeric(str_split_fixed(curr.sheets$q1a, "-", 2)[,1])
+curr.sheets$quad_1a_L = as.numeric(str_split_fixed(curr.sheets$q1a, "-", 2)[,2])
+curr.sheets$quad_1a_pct = curr.sheets$quad_1a_W / (curr.sheets$quad_1a_W + curr.sheets$quad_1a_L)
+
+curr.sheets$quad_1_W = as.numeric(str_split_fixed(curr.sheets$q1, "-", 2)[,1])
+curr.sheets$quad_1_L = as.numeric(str_split_fixed(curr.sheets$q1, "-", 2)[,2])
+curr.sheets$quad_1_pct = curr.sheets$quad_1_W / (curr.sheets$quad_1_W + curr.sheets$quad_1_L)
+
+curr.sheets$quad_2_W = as.numeric(str_split_fixed(curr.sheets$q2, "-", 2)[,1])
+curr.sheets$quad_2_L = as.numeric(str_split_fixed(curr.sheets$q2, "-", 2)[,2])
+
+curr.sheets$quad_3_W = as.numeric(str_split_fixed(curr.sheets$q3, "-", 2)[,1])
+curr.sheets$quad_3_L = as.numeric(str_split_fixed(curr.sheets$q3, "-", 2)[,2])
+
+curr.sheets$quad_4_W = as.numeric(str_split_fixed(curr.sheets$q4, "-", 2)[,1])
+curr.sheets$quad_4_L = as.numeric(str_split_fixed(curr.sheets$q4, "-", 2)[,2])
+
+curr.sheets$quad_234_W = curr.sheets$quad_2_W + curr.sheets$quad_3_W + curr.sheets$quad_4_W
+curr.sheets$quad_234_L = curr.sheets$quad_2_L + curr.sheets$quad_3_L + curr.sheets$quad_4_L
+
+curr.sheets$quad_234_pct = curr.sheets$quad_234_W / (curr.sheets$quad_234_W + curr.sheets$quad_234_L)
+
+curr.sheets$quad_234_pct[curr.sheets$quad_234_L==0 &
+                    curr.sheets$quad_234_W==0] = 0
+
+curr.sheets$quad_1_pct[curr.sheets$quad_1_L==0 &
+                    curr.sheets$quad_1_W==0] = 0
+
+
+
+curr.sheets$net = as.numeric(curr.sheets$net)
+curr.sheets$kpi_resume = as.numeric(curr.sheets$kpi_resume)
+curr.sheets$sor_resume = as.numeric(curr.sheets$sor_resume)
+curr.sheets$bpi_quality = as.numeric(curr.sheets$bpi_quality)
+curr.sheets$kp_quality = as.numeric(curr.sheets$kp_quality)
+curr.sheets$avg_resume = as.numeric(curr.sheets$avg_resume)
+curr.sheets$avg_quality = as.numeric(curr.sheets$avg_quality)
+
+# mod = glm(Y ~ net +
+#               #I(kpi_resume^2) +
+#               #I(avg_resume) +
+#               I(avg_resume^(0.5)) +
+#               #bpi_quality +
+#               #kp_quality +
+#               kp_quality +
+#               #quad_1_pct +
+#               quad_1_pct +
+#               quad_234_pct,
+#     data=train2,
+#     family='binomial')
+# 
+# summary(mod)
+```
+
+
+```{r}
+# curr.sheets$prediction = predict(object=mod, 
+#                                  newdata=curr.sheets,
+#                                  type="response")
+# 
+# curr.sheets %>% arrange(desc(prediction)) %>% select(team, prediction, sor_resume, net, kp_quality, quad_1_W, quad_234_pct, wab)
+# 
+# autobids <- curr.sheets %>% 
+#              group_by(conf) %>%
+#              filter(prediction == max(prediction) & conf != "ind") %>%
+#              arrange(desc(prediction))
+# 
+# autobids$bid = "auto"
+# autobids$first.four = FALSE
+# autobids$first.four[autobids$team %in% tail(autobids, 4)$team] = TRUE
+# 
+# at.large <- curr.sheets %>% 
+#   filter(!(team %in% autobids$team)) %>% 
+#   arrange(desc(prediction))
+# 
+# both <- curr.sheets[1:36,] %>% 
+#   filter(team %in% autobids$team) %>% 
+#   arrange(desc(prediction))
+# 
+# at.large = at.large[1:36,]
+# autobids$team = paste0(autobids$team, "*")
+# 
+# at.large$bid="at large"
+# at.large$first.four = FALSE
+# at.large$first.four[at.large$team %in% tail(at.large, 4)$team] = TRUE
+# 
+# made = rbind(autobids, at.large) %>% arrange(desc(prediction))
+# 
+# seeds = c(rep(1, 4),
+#   rep(2, 4),
+#   rep(3, 4),
+#   rep(4, 4),
+#   rep(5, 4),
+#   rep(6, 4),
+#   rep(7, 4),
+#   rep(8, 4),
+#   rep(9, 4),
+#   rep(10, 4),
+#   rep(11, 4),
+#   rep(12, 6),
+#   rep(13, 4),
+#   rep(14, 4),
+#   rep(15, 4),
+#   rep(16, 6))
+# 
+# while (length(seeds) < length(curr.sheets$team)){
+#   seeds = append(seeds, "MISSED")
+# }
+# 
+# curr.sheets %>% arrange(desc(prediction))
+# curr.sheets$seeds = seeds
+```
+
+
+```{r, resume-model}
+curr.sheets = curr.sheets %>% dplyr::rename(wab = wab.y,
+                                            wab.rank = wab.x)
+# train resume model and determine field of 68
+
+###      resume avg, wab, quad 1 win, quad 2-4 losses
+mod2 = glm(Y ~ 
+             I((avg_resume)^(1/24)) + 
+             #wab.rank + 
+             quad_1_W +
+            quad_234_L, 
+    data=train2, family="binomial")
+
+summary(mod2)
+
+
+curr.sheets$bubble = predict(object=mod2, 
+        newdata=curr.sheets,
+        type="response")
+
+#chk = curr.sheets %>% select(team, prediction) %>% arrange(desc(prediction))
+```
+
+
+```{r, performance-model}
+train2$Y2 = (12 - train2$seed)/11
+is.na(train2$Y2) = 0
+train2$seed = as.numeric(train2$seed)
+train2 = train2 %>% mutate(Y2 = case_when(
+  is.na(seed) ~ 0,
+  TRUE ~ (150 - seed^2)/149)
+  )
+
+# use performance metrics to seed field of 68
+
+###       NET, kenPom
+mod3 = glm(Y2 ~ 
+             I(net)+
+             I(kpi_resume)+
+             I(sor_resume^0.01)+
+             I(kp_quality^2),
+    data=train2)
+
+summary(mod3)
+
+curr.sheets$seeding = predict(object=mod3, 
+                              newdata=curr.sheets,
+                              type="response")
+curr.sheets = curr.sheets %>% arrange(desc(seeding))
+auto.bids = curr.sheets %>% 
+   group_by(conf) %>% 
+   filter(row_number()==1, 
+          !is.na(conf), conf != 'ind')
+
+#auto.bids$team = paste0(auto.bids$team, "*")
+curr.sheets %>% arrange(desc(seeding))
+
+at.large.teams = curr.sheets %>% arrange(desc(bubble)) %>% filter(!(team %in% auto.bids$team))
+at.large.teams = at.large.teams[1:37,]
+field.of.68 = rbind(at.large.teams, auto.bids) %>% arrange(desc(seeding))
+
+field.of.68 = rbind(field.of.68, curr.sheets[!(curr.sheets$team %in% field.of.68$team),] %>% arrange(desc(bubble)))
+
+seeds = c(rep(1, 4),
+  rep(2, 4),
+  rep(3, 4),
+  rep(4, 4),
+  rep(5, 4),
+  rep(6, 4),
+  rep(7, 4),
+  rep(8, 4),
+  rep(9, 4),
+  rep(10, 4),
+  rep(11, 4),
+  rep(12, 6),
+  rep(13, 4),
+  rep(14, 4),
+  rep(15, 4),
+  rep(16, 6))
+
+while (length(seeds) < length(curr.sheets$team)){
+  seeds = append(seeds, "MISSED")
+}
+
+field.of.68 %>% arrange(desc(seeding))
+field.of.68$seed = seeds[1:365]
+
+field.of.68$team = gsub(" F4O", "", field.of.68$team)
+field.of.68$team = gsub(" N4O", "", field.of.68$team)
+field.of.68 = field.of.68 %>% filter(team!='Team')
+
+
+field.of.68 = field.of.68 %>% 
+  mutate(team = case_when(
+    team %in% auto.bids$team ~ paste0(team,"*"),
+    TRUE ~ team
+  ))
+
+field.of.68$team = gsub("^Connecticut", "UConn", field.of.68$team)
+#field.of.68$team = gsub("^Connecticut$", "UConn", field.of.68$team)
+write.csv(field.of.68, "../../Teams/teamCSVs/bracketPredictions2.csv", row.names=FALSE)
+write.csv(field.of.68, "../../Teams/NCAAB_team_predictions/bracketPredictions2.csv", row.names=FALSE)
+field.of.68
+```
+
+
+```{r}
+#cbbdata::cbd_torvik_player_game(year=2025)
+chk = field.of.68 %>% select(team, seed)
+```
+
+
+
+
+
